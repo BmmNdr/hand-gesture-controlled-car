@@ -9,17 +9,25 @@ import mediapipe as mp
 
 from model import KeyPointClassifier
 
+COM = 'COM3'
+BAUDRATE = 9600
+VIDEO_SRC = 0
+WIDTH = 700
+HEIGHT = 500
+MAX_HAND = 2
+OUTOFBOUND = 20
+
 
 def main():
     # Serial COM preparation
     arduino = None
     try:
-        arduino = serial.Serial(port='COM3', baudrate=9600, timeout=.1)
+        arduino = serial.Serial(port=COM, baudrate=BAUDRATE)
     except:
         pass
 
     # Camera preparation
-    cap = cv.VideoCapture(0)
+    cap = cv.VideoCapture(VIDEO_SRC)
 
     # Model load
     mp_hands = mp.solutions.hands
@@ -29,7 +37,8 @@ def main():
     # Read labels
     with open('model/keypoint_classifier/keypoint_classifier_label.csv', encoding='utf-8-sig') as f:
         keypoint_classifier_labels = csv.reader(f)
-        keypoint_classifier_labels = [row[0] for row in keypoint_classifier_labels]
+        keypoint_classifier_labels = [row[0]
+                                      for row in keypoint_classifier_labels]
 
     while True:
         # ESC: end program
@@ -41,6 +50,7 @@ def main():
         if not ret:
             break
 
+        image = cv.resize(image, (WIDTH, HEIGHT))
         image = cv.flip(image, 1)  # Mirror display
         debug_image = copy.deepcopy(image)
 
@@ -51,8 +61,11 @@ def main():
         results = hands.process(image)
         image.flags.writeable = True
 
-        #process only with two hands
-        if results.multi_hand_landmarks and len(results.multi_hand_landmarks) == 2:
+        # motors values to send to arduino
+        motors_speed = [0, 0, 0, 0]
+
+        # process only with two hands
+        if results.multi_hand_landmarks and len(results.multi_hand_landmarks) == MAX_HAND:
 
             r_brect = None
             r_hand_sign_id = None
@@ -60,8 +73,7 @@ def main():
             l_brect = None
             l_hand_sign_id = None
 
-            for hand_landmarks, handedness in zip(results.multi_hand_landmarks,
-                                                  results.multi_handedness):
+            for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
                 # Bounding box calculation
                 brect = calc_bounding_rect(debug_image, hand_landmarks)
                 # Landmark calculation
@@ -74,21 +86,13 @@ def main():
                 # Hand sign classification
                 hand_sign_id = keypoint_classifier(pre_processed_landmark_list)
 
-                # Send data to arduino
-                if arduino:
-                    arduino.write(bytes(str(hand_sign_id), 'utf-8'))
-
                 # Drawing part
                 debug_image = draw_bounding_rect(debug_image, brect)
                 debug_image = draw_landmarks(debug_image, landmark_list)
                 debug_image = draw_info_text(
-                    debug_image,
-                    brect,
-                    handedness,
-                    keypoint_classifier_labels[hand_sign_id],
-                )
+                    debug_image, brect, handedness, keypoint_classifier_labels[hand_sign_id])
 
-                #Saving Left and Right hand information
+                # Saving Left and Right hand information
                 info_text = handedness.classification[0].label[0:]
                 if info_text == "Right":
                     r_brect = brect
@@ -97,13 +101,14 @@ def main():
                     l_brect = brect
                     l_hand_sign_id = hand_sign_id
 
-            if(r_brect and l_brect):
+            if (r_brect and l_brect):
                 debug_image = draw_connection(debug_image, r_brect, l_brect)
-                text = evaluate(r_brect, r_hand_sign_id, l_brect, l_hand_sign_id)
-                cv.putText(debug_image, text, (50,50), cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv.LINE_AA)
-        else:
-            if arduino:
-                    arduino.write(bytes(str(9), 'utf-8'))
+                # data to send to arduino
+                motors_speed = evaluate(
+                    r_brect, r_hand_sign_id, l_brect, l_hand_sign_id)
+
+        # send data to arduino
+        print(motors_speed)
 
         # Screen reflection
         cv.imshow('Hand Gesture Recognition', debug_image)
@@ -238,13 +243,15 @@ def draw_landmarks(image, landmark_point):
 
 
 def draw_bounding_rect(image, brect):
-    cv.rectangle(image, (brect[0], brect[1]), (brect[2], brect[3]), (0, 0, 0), 1)
+    cv.rectangle(image, (brect[0], brect[1]),
+                 (brect[2], brect[3]), (0, 0, 0), 1)
 
     return image
 
 
 def draw_info_text(image, brect, handedness, hand_sign_text):
-    cv.rectangle(image, (brect[0], brect[1]), (brect[2], brect[1] - 22), (255, 0, 0), -1)
+    cv.rectangle(image, (brect[0], brect[1]),
+                 (brect[2], brect[1] - 22), (255, 0, 0), -1)
 
     info_text = handedness.classification[0].label[0:]
     if hand_sign_text != "":
@@ -255,9 +262,12 @@ def draw_info_text(image, brect, handedness, hand_sign_text):
 
     return image
 
+
 def draw_connection(image, r_brect, l_brect):
-    rm = middle_point((r_brect[0],r_brect[1]),(r_brect[2],r_brect[3])) # right hand barycenter
-    lm = middle_point((l_brect[0],l_brect[1]),(l_brect[2],l_brect[3])) # left hand barycenter
+    # right hand barycenter
+    rm = middle_point((r_brect[0], r_brect[1]), (r_brect[2], r_brect[3]))
+    # left hand barycenter
+    lm = middle_point((l_brect[0], l_brect[1]), (l_brect[2], l_brect[3]))
     m = middle_point(rm, lm)
 
     cv.line(image, rm, lm, (0, 255, 0), 2)
@@ -267,30 +277,49 @@ def draw_connection(image, r_brect, l_brect):
 
     return image
 
+
 def evaluate(r_brect, r_hand_sign_id, l_brect, l_hand_sign_id):
-    rm = middle_point((r_brect[0],r_brect[1]),(r_brect[2],r_brect[3])) # right hand barycenter
-    lm = middle_point((l_brect[0],l_brect[1]),(l_brect[2],l_brect[3])) # left hand barycenter
+    # right hand barycenter
+    rm = middle_point((r_brect[0], r_brect[1]), (r_brect[2], r_brect[3]))
+    # left hand barycenter
+    lm = middle_point((l_brect[0], l_brect[1]), (l_brect[2], l_brect[3]))
     m = middle_point(rm, lm)
 
     slope = get_slope(rm, lm)
 
-    text = f'{slope:.2f}' + " "
+    # forward right, backwards right, forward left, backwards left
+    motor = [0, 0, 0, 0]
 
-    # remember y axis is inverted!!
-    if 0.1 > slope and slope > -0.1:
-        text += "Center "
-    elif slope > 0:
-        text += "Left "
-    elif slope < 0:
-        text += "Right "
+    if 0.1 > slope and slope > -0.1:  # center
+        speed = map_range(m[1], OUTOFBOUND, HEIGHT - OUTOFBOUND, 255, 0)
+        if r_hand_sign_id == 1 and l_hand_sign_id == 1:  # forward
+            motor[0] = motor[2] = speed
+        elif r_hand_sign_id == 0 and l_hand_sign_id == 0:  # backwards
+            motor[1] = motor[3] = speed
+    elif slope > 0:  # left
+        rotation_speed = map_range(slope, 0.1, 1, 0, 255)
+        motor[1] = motor[3] = rotation_speed
+    elif slope < 0:  # right
+        rotation_speed = map_range(slope, -1, -0.1, 0, 255)
+        motor[0] = motor[2] = rotation_speed
 
-    if r_hand_sign_id == 1 and l_hand_sign_id == 1:
-        text += "Forwards"
-    
-    if r_hand_sign_id == 0 and l_hand_sign_id == 0:
-        text += "Backwards"
+    return motor
 
-    return text
+#    text = f'{slope:.2f}' + " "
+#
+#    # remember y axis is inverted!!
+#    if 0.1 > slope and slope > -0.1:
+#        text += "Center "
+#    elif slope > 0:
+#        text += "Left "
+#    elif slope < 0:
+#        text += "Right "
+#
+#    if r_hand_sign_id == 1 and l_hand_sign_id == 1:
+#        text += "Forwards "
+#
+#    if r_hand_sign_id == 0 and l_hand_sign_id == 0:
+#        text += "Backwards "
 
 
 def get_slope(rm, lm):
@@ -305,6 +334,11 @@ def middle_point(p0, p1):
     my = round((p0[1] + p1[1]) / 2)
 
     return (int(mx), int(my))
+
+
+def map_range(x, in_min, in_max, out_min, out_max):
+    return (x - in_min) * (out_max - out_min) // (in_max - in_min) + out_min
+
 
 if __name__ == '__main__':
     main()
