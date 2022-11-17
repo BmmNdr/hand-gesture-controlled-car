@@ -255,6 +255,7 @@ def draw_info_text(image, brect, handedness, hand_sign_text):
 
     return image
 
+
 def draw_connection(image, r_brect, l_brect):
     rm = middle_point((r_brect[0],r_brect[1]),(r_brect[2],r_brect[3])) # right hand barycenter
     lm = middle_point((l_brect[0],l_brect[1]),(l_brect[2],l_brect[3])) # left hand barycenter
@@ -266,6 +267,7 @@ def draw_connection(image, r_brect, l_brect):
     cv.circle(image, m, 5, (0, 255, 0), -1)
 
     return image
+
 
 def evaluate(r_brect, r_hand_sign_id, l_brect, l_hand_sign_id):
     rm = middle_point((r_brect[0],r_brect[1]),(r_brect[2],r_brect[3])) # right hand barycenter
@@ -290,6 +292,8 @@ def evaluate(r_brect, r_hand_sign_id, l_brect, l_hand_sign_id):
     if r_hand_sign_id == 0 and l_hand_sign_id == 0:
         text += "Backwards"
 
+    speed = map_range(m[1], 0, 100, 0, 255)
+
     return text
 
 
@@ -305,6 +309,11 @@ def middle_point(p0, p1):
     my = round((p0[1] + p1[1]) / 2)
 
     return (int(mx), int(my))
+
+
+def map_range(x, in_min, in_max, out_min, out_max):
+  return (x - in_min) * (out_max - out_min) // (in_max - in_min) + out_min
+
 
 if __name__ == '__main__':
     main()
