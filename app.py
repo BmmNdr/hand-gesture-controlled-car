@@ -15,7 +15,8 @@ VIDEO_SRC = 0
 WIDTH = 700
 HEIGHT = 500
 MAX_HAND = 2
-OUTOFBOUND = 20
+OUTOFBOUND_MIN = 20
+OUTOFBOUND_MAX = 20
 
 
 def main():
@@ -257,7 +258,7 @@ def draw_info_text(image, brect, handedness, hand_sign_text):
     if hand_sign_text != "":
         info_text = info_text + ':' + hand_sign_text
 
-    cv.putText(image, info_text, (brect[0] + 5, brect[1] - 4), cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1,
+    cv.putText(image, info_text, (brect[0] + 5, brect[1] - 4), cv.FONT_HERSHEY_SIMPLEX, .6, (255, 255, 255), 1,
                cv.LINE_AA)
 
     return image
@@ -290,36 +291,20 @@ def evaluate(r_brect, r_hand_sign_id, l_brect, l_hand_sign_id):
     # forward right, backwards right, forward left, backwards left
     motor = [0, 0, 0, 0]
 
-    if 0.1 > slope and slope > -0.1:  # center
-        speed = map_range(m[1], OUTOFBOUND, HEIGHT - OUTOFBOUND, 255, 0)
+    if .1 > slope and slope > -.1:  # center
+        speed = map_range(m[1], OUTOFBOUND_MIN, HEIGHT - OUTOFBOUND_MAX, 255, 0)
         if r_hand_sign_id == 1 and l_hand_sign_id == 1:  # forward
             motor[0] = motor[2] = speed
         elif r_hand_sign_id == 0 and l_hand_sign_id == 0:  # backwards
             motor[1] = motor[3] = speed
     elif slope > 0:  # left
-        rotation_speed = map_range(slope, 0.1, 1, 0, 255)
+        rotation_speed = map_range(slope, .1, 1, 0, 255)
         motor[1] = motor[3] = rotation_speed
     elif slope < 0:  # right
-        rotation_speed = map_range(slope, -1, -0.1, 0, 255)
+        rotation_speed = map_range(slope, -1, -.1, 255, 0)
         motor[0] = motor[2] = rotation_speed
 
     return motor
-
-#    text = f'{slope:.2f}' + " "
-#
-#    # remember y axis is inverted!!
-#    if 0.1 > slope and slope > -0.1:
-#        text += "Center "
-#    elif slope > 0:
-#        text += "Left "
-#    elif slope < 0:
-#        text += "Right "
-#
-#    if r_hand_sign_id == 1 and l_hand_sign_id == 1:
-#        text += "Forwards "
-#
-#    if r_hand_sign_id == 0 and l_hand_sign_id == 0:
-#        text += "Backwards "
 
 
 def get_slope(rm, lm):
@@ -337,6 +322,10 @@ def middle_point(p0, p1):
 
 
 def map_range(x, in_min, in_max, out_min, out_max):
+    if x < in_min: return out_min
+
+    if x > in_max: return out_max
+
     return (x - in_min) * (out_max - out_min) // (in_max - in_min) + out_min
 
 
