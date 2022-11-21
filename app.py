@@ -2,6 +2,7 @@ import csv
 import copy
 import itertools
 import serial
+import math
 
 import cv2 as cv
 import numpy as np
@@ -63,7 +64,7 @@ def main():
         image.flags.writeable = True
 
         # motors values to send to arduino
-        motors_speed = [0, 0, 0, 0]
+        motors_speed = [128, 128]
 
         # process only with two hands
         if results.multi_hand_landmarks and len(results.multi_hand_landmarks) == MAX_HAND:
@@ -102,20 +103,54 @@ def main():
                     l_brect = brect
                     l_hand_sign_id = hand_sign_id
 
-            if (r_brect and l_brect):
+            if r_brect and l_brect:
                 debug_image = draw_connection(debug_image, r_brect, l_brect)
                 # data to send to arduino
-                motors_speed = evaluate(
-                    r_brect, r_hand_sign_id, l_brect, l_hand_sign_id)
+                motors_speed = evaluate(r_brect, r_hand_sign_id, l_brect, l_hand_sign_id)
 
         # send data to arduino
         print(motors_speed)
+        print(transform_data(motors_speed))
+        to_send = [int(motors_speed[0]).to_bytes(1, byteorder='big'), int(motors_speed[1]).to_bytes(1, byteorder='big')]
+        print(to_send)
+
+        try:
+            arduino.write(to_send)
+        except:
+            pass
 
         # Screen reflection
         cv.imshow('Hand Gesture Recognition', debug_image)
 
     cap.release()
     cv.destroyAllWindows()
+
+
+def transform_data(motors):
+    dx = motors[0]
+    sx = motors[1]
+
+    # right forward, right backwards, left forward, left backwards
+    motors_value = [0, 0, 0, 0]
+    if dx < 128:
+        motors_value[1] = map_range(dx, 0, 127, 255, 1)
+        motors_value[0] = 0
+    elif dx > 128:
+        motors_value[0] = map_range(dx, 129, 255, 1, 255)
+        motors_value[1] = 0
+    else:
+        motors_value[0] = motors_value[1] = 0
+
+    if sx < 128:
+        motors_value[3] = map_range(sx, 0, 127, 255, 0)
+        motors_value[2] = 0
+    elif sx > 128:
+        motors_value[2] = map_range(sx, 129, 255, 1, 255)
+        motors_value[3] = 0
+    else:
+        motors_value[3] = motors_value[2] = 0
+
+    return motors_value
 
 
 def calc_bounding_rect(image, landmarks):
@@ -287,22 +322,38 @@ def evaluate(r_brect, r_hand_sign_id, l_brect, l_hand_sign_id):
     m = middle_point(rm, lm)
 
     slope = get_slope(rm, lm)
+    angle = math.degrees(math.atan(slope))
 
-    # forward right, backwards right, forward left, backwards left
-    motor = [0, 0, 0, 0]
+    # right, left
+    motor = [0, 0]
 
-    if .1 > slope and slope > -.1:  # center
-        speed = map_range(m[1], OUTOFBOUND_MIN, HEIGHT - OUTOFBOUND_MAX, 255, 0)
-        if r_hand_sign_id == 1 and l_hand_sign_id == 1:  # forward
-            motor[0] = motor[2] = speed
-        elif r_hand_sign_id == 0 and l_hand_sign_id == 0:  # backwards
-            motor[1] = motor[3] = speed
-    elif slope > 0:  # left
-        rotation_speed = map_range(slope, .1, 1, 0, 255)
-        motor[1] = motor[3] = rotation_speed
-    elif slope < 0:  # right
-        rotation_speed = map_range(slope, -1, -.1, 255, 0)
-        motor[0] = motor[2] = rotation_speed
+    # forward
+    if (r_hand_sign_id == 1 or r_hand_sign_id == 2) and (l_hand_sign_id == 1 or l_hand_sign_id == 2):
+        speed = map_range(m[1], OUTOFBOUND_MIN, HEIGHT - OUTOFBOUND_MAX, 255, 128)
+        if -.1 < slope < .1:  # center
+            motor[0] = motor[1] = speed
+        elif slope > 0:  # left
+            motor[0] = speed
+            rot_coef = map_range(angle, 0, 45, 0.0, 1.0)
+            motor[1] = (1 - rot_coef) * speed
+        elif slope < 0:  # right
+            motor[1] = speed
+            rot_coef = map_range(angle, -45, 0, 1.0, 0.0)
+            motor[0] = (1 - rot_coef) * speed
+
+    # backwards
+    elif (r_hand_sign_id == 0 or r_hand_sign_id == 3) and (l_hand_sign_id == 0 or l_hand_sign_id == 3):
+        speed = map_range(m[1], OUTOFBOUND_MIN, HEIGHT - OUTOFBOUND_MAX, 1, 128)
+        if -.1 < slope < .1:  # center
+            motor[0] = motor[1] = speed
+        elif slope > 0:  # left
+            motor[0] = speed
+            rot_coef = map_range(angle, 0, 45, 0.0, 1.0)
+            motor[1] = (1 - rot_coef) * speed
+        elif slope < 0:  # right
+            motor[1] = speed
+            rot_coef = map_range(angle, -45, 0, 1.0, 0.0)
+            motor[0] = (1 - rot_coef) * speed
 
     return motor
 
@@ -326,7 +377,7 @@ def map_range(x, in_min, in_max, out_min, out_max):
 
     if x > in_max: return out_max
 
-    return (x - in_min) * (out_max - out_min) // (in_max - in_min) + out_min
+    return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
 
 
 if __name__ == '__main__':
