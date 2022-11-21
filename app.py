@@ -10,7 +10,7 @@ import mediapipe as mp
 
 from model import KeyPointClassifier
 
-COM = 'COM3'
+COM = 'COM5'
 BAUDRATE = 9600
 VIDEO_SRC = 0
 WIDTH = 700
@@ -25,8 +25,9 @@ def main():
     arduino = None
     try:
         arduino = serial.Serial(port=COM, baudrate=BAUDRATE)
+        print("Serial Connected")
     except:
-        pass
+        print("Serial Not Connected")
 
     # Camera preparation
     cap = cv.VideoCapture(VIDEO_SRC)
@@ -109,15 +110,19 @@ def main():
                 motors_speed = evaluate(r_brect, r_hand_sign_id, l_brect, l_hand_sign_id)
 
         # send data to arduino
-        print(motors_speed)
-        print(transform_data(motors_speed))
+
+
+        # print(motors_speed)
+        # print(transform_data(motors_speed))
         to_send = [int(motors_speed[0]).to_bytes(1, byteorder='big'), int(motors_speed[1]).to_bytes(1, byteorder='big')]
         print(to_send)
 
         try:
-            arduino.write(to_send)
+            arduino.write(to_send[0])
+            arduino.write(to_send[1])
+            print("Data Sent")
         except:
-            pass
+            print("Data Not Sent")
 
         # Screen reflection
         cv.imshow('Hand Gesture Recognition', debug_image)
